@@ -10,47 +10,47 @@ servers = {
   # A standalone node. insecure skips the certificate check, only while the
   # API certificate is self-signed.
   pve01 = {
-    endpoint       = "https://192.0.2.2:8006/"
-    insecure       = true
-    template_node  = "pve01"
-    template_vm_id = 2604001
+    endpoint     = "https://192.0.2.2:8006/"
+    insecure     = true
+    default_node = "pve01"
   }
 
-  # A cluster, reached through its first node, which holds the template.
-  # template_node must be the node the ansible pve role builds the template on:
-  # the cluster's first PVE host in the inventory. The VMID follows the pve
-  # role's pve_template_ubuntu_version, 26.04 giving 2604001.
+  # A cluster, reached through its first node. installer_iso is shown with its
+  # default. The ansible pve role puts that file on every node's local storage.
   lab = {
-    endpoint       = "https://192.0.2.3:8006/"
-    template_node  = "pve02"
-    template_vm_id = 2604001
+    endpoint      = "https://192.0.2.3:8006/"
+    default_node  = "pve02"
+    installer_iso = "local:iso/nixos-fleet-installer.iso"
   }
 }
 
-# Keyed by the Ansible host's serverHostname in lower case. ipv4_address, less
-# the prefix, must match the host's ansible_host; site.yml stops if it does not.
+# Keyed by the Ansible host's serverHostname in lower case. ipv4_address and
+# ipv4_gateway must match the host in the inventory. site.yml stops if they
+# do not.
 vms = {
   # A standalone server has one node, so there is nothing to pin.
   example01 = {
-    server       = "pve01"
-    cores        = 2
-    memory_mb    = 4096
-    vlan_id      = 7
-    ipv4_address = "192.0.2.10/24"
-    ipv4_gateway = "192.0.2.1"
-    dns_servers  = ["192.0.2.1"]
-    tags         = ["docker"]
+    server         = "pve01"
+    cores          = 2
+    memory_mb      = 4096
+    vlan_id        = 7
+    ipv4_address   = "192.0.2.10/24"
+    ipv4_gateway   = "192.0.2.1"
+    dns_servers    = ["192.0.2.1"]
+    tags           = ["docker"]
+    os_disk_gb     = 20
+    docker_disk_gb = 60
 
-    # scsi2 is the persistent disk the ansible docker role mounts at
-    # /srv/persist.
+    # scsi2 is the persistent disk, mounted at /srv/persist. An install
+    # formats it only when it is blank.
     extra_disks = {
       persist = { interface = "scsi2", size_gb = 100 }
     }
   }
 
-  # Pinned: cloned on pve02, migrated to pve03, and moved back there if it
-  # is ever moved. Without node_name it would be created on pve02 and then
-  # left wherever it runs.
+  # Pinned: created on pve03, and moved back there if it is ever moved.
+  # Without node_name it would be created on pve02 and then left wherever it
+  # runs. The disks take their default sizes.
   example02 = {
     server       = "lab"
     node_name    = "pve03"

@@ -1,5 +1,5 @@
 variable "name" {
-  description = "VM name. Cloud-init uses it as the hostname, so it must be a valid DNS label."
+  description = "VM name. Proxmox writes it to the cloud-init drive as the hostname, so it must be a valid DNS label."
   type        = string
 
   validation {
@@ -13,28 +13,19 @@ variable "node_name" {
   type        = string
 }
 
-variable "template_vm_id" {
-  description = "VMID of the cloud-init template to clone."
-  type        = number
-}
-
-variable "template_node_name" {
-  description = <<-EOT
-    Node the template lives on. Null means node_name. On another node of the
-    same cluster, the clone is made there and migrated to node_name.
-  EOT
-  type        = string
-  default     = null
-}
-
 variable "vm_id" {
-  description = "VMID for the new VM. Null lets Proxmox pick the next free one."
+  description = "VMID for the VM. Null lets Proxmox pick the next free one."
   type        = number
   default     = null
 }
 
 variable "datastore_id" {
-  description = "Datastore for the cloned disks and the cloud-init drive."
+  description = "Datastore for the disks and the cloud-init drive."
+  type        = string
+}
+
+variable "installer_iso" {
+  description = "Installer ISO attached as the CD-ROM on ide2, as <datastore>:iso/<file name>. It has to exist on the node the VM is created on."
   type        = string
 }
 
@@ -45,13 +36,13 @@ variable "cores" {
 }
 
 variable "cpu_type" {
-  description = "CPU type. Check `qm config <template-vmid>` and match it. If the template sets none, Proxmox uses its own default for new VMs."
+  description = "CPU type the guest sees."
   type        = string
   default     = "x86-64-v2-AES"
 }
 
 variable "numa" {
-  description = "Enable NUMA. The template is built with --numa 1."
+  description = "Enable NUMA."
   type        = bool
   default     = true
 }
@@ -63,13 +54,13 @@ variable "memory_mb" {
 }
 
 variable "balloon_mb" {
-  description = "Balloon minimum in MB. 0 disables ballooning. The template uses 1024. The default of 0 gives every VM a fixed amount of memory. Set it above 0 to let Proxmox reclaim memory from an idle guest under host pressure."
+  description = "Balloon minimum in MB. 0 disables ballooning, which gives the VM a fixed amount of memory. Set it above 0 to let Proxmox reclaim memory from an idle guest under host pressure."
   type        = number
   default     = 0
 }
 
 variable "on_boot" {
-  description = "Start the VM when the Proxmox node boots. The template leaves this off."
+  description = "Start the VM when the Proxmox node boots."
   type        = bool
   default     = true
 }
@@ -81,7 +72,7 @@ variable "bridge" {
 }
 
 variable "vlan_id" {
-  description = "VLAN tag for the primary network device. Null keeps the tag carried by the template."
+  description = "VLAN tag for the primary network device. Null leaves it untagged."
   type        = number
   default     = null
 }
@@ -102,29 +93,40 @@ variable "ipv4_gateway" {
 }
 
 variable "dns_servers" {
-  description = "Nameservers written to cloud-init. Empty leaves the template's setting."
+  description = "Nameservers written to the cloud-init drive. Empty leaves the choice to Proxmox, which passes on the node's own."
   type        = list(string)
   default     = []
 }
 
+variable "os_disk_gb" {
+  description = "Size of scsi0 in GB. The installer puts / and /boot on it."
+  type        = number
+  default     = 20
+}
+
+variable "docker_disk_gb" {
+  description = "Size of scsi1 in GB. The installer puts /var/lib/docker on it."
+  type        = number
+  default     = 40
+}
+
 variable "extra_disks" {
-  description = "Disks added on top of the two the template already carries (scsi0 and scsi1). The interface is explicit, for example scsi2."
+  description = "Disks added after scsi0 and scsi1. The interface is explicit, for example scsi2."
   type = map(object({
     interface    = string
     size_gb      = number
     datastore_id = optional(string)
   }))
   default = {}
-}
 
-variable "template_tags" {
-  description = "Tags the template carries (see `qm config <template-vmid>`). Kept on every clone. Update this if the template's tags change."
-  type        = list(string)
-  default     = ["26.04", "cloudinit", "ubuntu"]
+  validation {
+    condition     = alltrue([for disk in values(var.extra_disks) : !contains(["scsi0", "scsi1"], disk.interface)])
+    error_message = "extra_disks cannot use scsi0 or scsi1, which are the OS disk and the Docker disk."
+  }
 }
 
 variable "tags" {
-  description = "Proxmox tags added to the template's tags and the `tofu` tag."
+  description = "Proxmox tags added to the `nixos` and `tofu` tags."
   type        = list(string)
   default     = []
 }
@@ -136,7 +138,7 @@ variable "started" {
 }
 
 variable "agent_timeout" {
-  description = "How long to wait for the QEMU guest agent to report an address. A clone without a running agent blocks for this long, so keep it short."
+  description = "How long to wait for the QEMU guest agent to report an address. A VM without a running agent blocks for this long, so keep it short."
   type        = string
   default     = "5m"
 }

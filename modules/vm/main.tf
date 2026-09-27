@@ -8,29 +8,47 @@ terraform {
   }
 }
 
+locals {
+  # scsi0 and scsi1 are fixed by the host layout: the installer partitions
+  # them by their by-id paths. Disks from extra_disks follow, in key order.
+  disks = concat(
+    [
+      { interface = "scsi0", size_gb = var.os_disk_gb, datastore_id = var.datastore_id },
+      { interface = "scsi1", size_gb = var.docker_disk_gb, datastore_id = var.datastore_id },
+    ],
+    [
+      for disk in values(var.extra_disks) : {
+        interface    = disk.interface
+        size_gb      = disk.size_gb
+        datastore_id = coalesce(disk.datastore_id, var.datastore_id)
+      }
+    ],
+  )
+}
+
 resource "proxmox_virtual_environment_vm" "this" {
   name      = var.name
   node_name = var.node_name
   vm_id     = var.vm_id
-  # Setting tags on a clone replaces the template's, so they are merged in
-  # here. The "tofu" tag marks VMs this configuration manages.
-  tags    = sort(distinct(concat(var.template_tags, ["tofu"], var.tags)))
+  # The "tofu" tag marks VMs this configuration manages.
+  tags    = sort(distinct(concat(["nixos", "tofu"], var.tags)))
   started = var.started
   on_boot = var.on_boot
   # A changed node_name migrates the VM within its cluster rather than
   # replacing it, which prevent_destroy would refuse anyway.
   migrate = true
 
-  clone {
-    vm_id        = var.template_vm_id
-    node_name    = var.template_node_name
-    datastore_id = var.datastore_id
-    full         = true
+  # The OS disk comes first, so an installed VM boots it. A blank one has
+  # nothing to boot there and falls through to the installer ISO.
+  boot_order    = ["scsi0", "ide2"]
+  scsi_hardware = "virtio-scsi-single"
+
+  operating_system {
+    type = "l26"
   }
 
   # Set explicitly because the provider's own defaults (qemu64, no NUMA)
-  # would otherwise override what the template carries. The template is built
-  # with --numa 1 and no CPU type.
+  # would otherwise apply.
   cpu {
     cores = var.cores
     type  = var.cpu_type
@@ -47,17 +65,25 @@ resource "proxmox_virtual_environment_vm" "this" {
     timeout = var.agent_timeout
   }
 
+  # The console is the serial port, which is where the installer and an
+  # installed host both put theirs.
+  serial_device {
+    device = "socket"
+  }
+
+  vga {
+    type = "serial0"
+  }
+
   network_device {
     bridge  = var.bridge
     vlan_id = var.vlan_id
   }
 
-  # The template already carries the scsi0 boot disk and the scsi1 data disk,
-  # and a full clone copies both. Only disks beyond those are declared here.
   dynamic "disk" {
-    for_each = var.extra_disks
+    for_each = local.disks
     content {
-      datastore_id = coalesce(disk.value.datastore_id, var.datastore_id)
+      datastore_id = disk.value.datastore_id
       interface    = disk.value.interface
       size         = disk.value.size_gb
       file_format  = "raw"
@@ -67,8 +93,16 @@ resource "proxmox_virtual_environment_vm" "this" {
     }
   }
 
+  cdrom {
+    interface = "ide2"
+    file_id   = var.installer_iso
+  }
+
+  # Only the installer reads the cloud-init drive. An installed host takes its
+  # address from its own configuration.
   initialization {
     datastore_id = var.datastore_id
+    interface    = "ide0"
 
     ip_config {
       ipv4 {
@@ -88,11 +122,11 @@ resource "proxmox_virtual_environment_vm" "this" {
   # Destroying a fleet VM has to be a deliberate edit of this file, not a
   # side effect of a plan.
   #
-  # The clone source only matters when the VM is created. Without the
-  # ignore_changes, a newer template VMID or a different template node would
-  # plan to replace every VM.
+  # Nothing is listed under ignore_changes. The provider changes the ISO, the
+  # boot order, the cloud-init values and a disk's size in place, so none of
+  # them plans a replacement, and the drives stay correct for the next
+  # install of the VM.
   lifecycle {
     prevent_destroy = true
-    ignore_changes  = [clone]
   }
 }

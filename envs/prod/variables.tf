@@ -8,12 +8,12 @@ variable "servers" {
     # Null falls back to PROXMOX_VE_ENDPOINT and PROXMOX_VE_INSECURE.
     endpoint = optional(string)
     insecure = optional(bool)
-    # The node holding the cloud-init template. Clones for other nodes of the
-    # cluster are made there and migrated.
-    template_node  = string
-    template_vm_id = number
-    template_tags  = optional(list(string), ["26.04", "cloudinit", "ubuntu"])
-    datastore_id   = optional(string, "local-zfs")
+    # The node a new VM is created on when it pins none.
+    default_node = string
+    # The installer ISO every VM boots until it is installed. It has to be on
+    # every node a VM is created on.
+    installer_iso = optional(string, "local:iso/nixos-fleet-installer.iso")
+    datastore_id  = optional(string, "local-zfs")
   }))
 
   validation {
@@ -37,24 +37,26 @@ variable "vms" {
   type = map(object({
     server = string
     # Pins the VM to this node: every apply moves it back here. Null leaves it
-    # wherever it is, and creates it on the server's template_node.
-    node_name     = optional(string)
-    datastore_id  = optional(string)
-    vm_id         = optional(number)
-    cores         = optional(number, 2)
-    cpu_type      = optional(string, "x86-64-v2-AES")
-    numa          = optional(bool, true)
-    memory_mb     = optional(number, 2048)
-    balloon_mb    = optional(number, 0)
-    on_boot       = optional(bool, true)
-    bridge        = optional(string, "vmbr0")
-    vlan_id       = optional(number)
-    ipv4_address  = string
-    ipv4_gateway  = string
-    dns_servers   = optional(list(string), [])
-    tags          = optional(list(string), [])
-    started       = optional(bool, true)
-    agent_timeout = optional(string, "5m")
+    # wherever it is, and creates it on the server's default_node.
+    node_name      = optional(string)
+    datastore_id   = optional(string)
+    vm_id          = optional(number)
+    cores          = optional(number, 2)
+    cpu_type       = optional(string, "x86-64-v2-AES")
+    numa           = optional(bool, true)
+    memory_mb      = optional(number, 2048)
+    balloon_mb     = optional(number, 0)
+    on_boot        = optional(bool, true)
+    bridge         = optional(string, "vmbr0")
+    vlan_id        = optional(number)
+    ipv4_address   = string
+    ipv4_gateway   = string
+    dns_servers    = optional(list(string), [])
+    tags           = optional(list(string), [])
+    started        = optional(bool, true)
+    agent_timeout  = optional(string, "5m")
+    os_disk_gb     = optional(number, 20)
+    docker_disk_gb = optional(number, 40)
     extra_disks = optional(map(object({
       interface    = string
       size_gb      = number
