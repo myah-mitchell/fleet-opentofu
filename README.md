@@ -1,31 +1,78 @@
 # opentofu
 
-OpenTofu configuration that creates the fleet's VMs on Proxmox by cloning the cloud-init template the `ansible` repo builds. It is the first stage of the ansible repo's `site.yml`, which builds a host in one run. See [How a host is built](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/how-a-host-is-built/).
+OpenTofu configuration that creates the fleet's VMs on Proxmox. Each VM is created blank, with the installer ISO in its CD-ROM drive, and boots into the installer. It is the first stage of the ansible repo's `site.yml`, which builds a host in one run. See [How a host is built](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/how-a-host-is-built/).
 
-What a clone does on first boot depends on the template's vendor snippet, which the ansible repo's `pve` role writes. In `minimal` mode it starts the guest agent and creates the `ansible` login, and `site.yml` provisions the VM over SSH and passes it the Komodo onboarding key. In `provision` mode the clone provisions itself, and the onboarding key is a step by hand.
+Status: validated and planned offline, not yet applied to a Proxmox host. See [Not yet confirmed](#not-yet-confirmed).
+
+## Contents
+
+- [What a VM is made of](#what-a-vm-is-made-of)
+- [Layout](#layout)
+- [Runtime configuration](#runtime-configuration)
+- [Usage](#usage)
+- [Servers and clusters](#servers-and-clusters)
+- [Driven from Ansible](#driven-from-ansible)
+- [Scoped token](#scoped-token)
+- [Apply returns before the host is installed](#apply-returns-before-the-host-is-installed)
+- [Changing a VM that is installed](#changing-a-vm-that-is-installed)
+- [Verified](#verified)
+- [Not yet confirmed](#not-yet-confirmed)
+- [License](#license)
+
+## What a VM is made of
+
+The module declares every drive, so nothing about a VM comes from outside this repo and its tfvars.
+
+| Drive | Variable | Default | Holds |
+| --- | --- | --- | --- |
+| scsi0 | `os_disk_gb` | 20 | `/` and `/boot` |
+| scsi1 | `docker_disk_gb` | 40 | `/var/lib/docker` |
+| scsi2 | `extra_disks` | none | `/srv/persist`, the persistent disk |
+| ide2 | `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The installer ISO, as a CD-ROM |
+| ide0 | `ipv4_address`, `ipv4_gateway`, `dns_servers` | none | The cloud-init drive |
+
+The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install.
+
+Only the installer reads the cloud-init drive, to take the address it listens on. An installed host takes its address from its own configuration.
+
+The module sets the rest of the hardware the same way for every VM:
+
+| Setting | Value |
+| --- | --- |
+| SCSI controller | `virtio-scsi-single` |
+| Disk options | raw, discard on, SSD emulation, one IO thread per disk |
+| Console | A serial port, with the display on `serial0` |
+| Guest agent | Enabled |
+| OS type | `l26` |
+| Firmware | SeaBIOS, the provider's default |
+| Tags | `nixos`, `tofu`, and the VM's own `tags` |
+
+See [Host layout](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/host-layout/) for what the installer does with the three disks.
 
 ## Layout
 
-```
-modules/vm/           one VM: clone, cores/memory, VLAN, static IP, extra disks
+```text
+modules/vm/        one VM: drives, boot order, cores, memory, VLAN, static address
 envs/prod/         the environment: providers, backend, encryption, VM map
   terraform.tfvars.example
 ```
 
-Real values (servers, node names, IPs, VLANs) go in a tfvars file in the private repo, at `opentofu/prod.tfvars` in `fleet-private`, next to the Ansible inventory. `*.tfvars` is git-ignored here. No secret belongs in this repo or in the tfvars.
+Real values (servers, node names, addresses, VLANs) go in a tfvars file in the private repo, at `opentofu/prod.tfvars` in `fleet-private`, next to the Ansible inventory. `*.tfvars` is git-ignored here. No secret belongs in this repo or in the tfvars.
 
 ## Runtime configuration
 
 Everything sensitive arrives as environment variables:
 
 | Variable | Purpose |
-|---|---|
+| --- | --- |
 | `TF_VAR_server_api_tokens` | JSON map of API tokens, one per server in `servers`, each `user@realm!tokenid=secret`: a scoped token, not `root@pam` |
 | `PROXMOX_VE_API_TOKEN` | The token for a server missing from that map. Only one server can use it, since two servers never share a token |
 | `PROXMOX_VE_ENDPOINT` | The API URL for a server whose `endpoint` is null |
 | `PROXMOX_VE_INSECURE` | `true` only while the API certificate is not yet trusted, for a server whose `insecure` is null |
-| `PG_CONN_STR` | Postgres connection string for the `pg` state backend. On ci01 this is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`, a second database on Semaphore's Postgres (see [The state database](https://myah-mitchell.github.io/docs/fleet-bootstrap/foundation/handover/#state-database)), on a network that does not leave ci01 |
-| `TF_ENCRYPTION` | State and plan encryption config (see below) |
+| `PG_CONN_STR` | Postgres connection string for the `pg` state backend |
+| `TF_ENCRYPTION` | State and plan encryption config |
+
+On ci01, `PG_CONN_STR` is `postgres://tofu:<password>@postgres:5432/tofu_state?sslmode=disable`. That is a second database on Semaphore's Postgres, on a network that does not leave ci01. See [The state database](https://myah-mitchell.github.io/docs/fleet-bootstrap/foundation/handover/#state-database).
 
 `TF_ENCRYPTION` holds the key provider and method:
 
@@ -36,11 +83,11 @@ state { method = method.aes_gcm.main }
 plan  { method = method.aes_gcm.main }
 ```
 
-The code marks state and plan encryption as `enforced`, so OpenTofu refuses to run without it. When `TF_ENCRYPTION` is missing the error is `Invalid expression` on the `state {` line (OpenTofu 1.12) or `Missing encryption method` (1.9). That is the encryption check failing, not a syntax problem, and no state is written.
+The code marks state and plan encryption as `enforced`, so OpenTofu refuses to plan or apply without it. When `TF_ENCRYPTION` is missing the error is `Invalid expression` on the `state {` line (OpenTofu 1.12) or `Missing encryption method` (1.9). That is the encryption check failing, not a syntax problem, and no state is written.
 
 ## Usage
 
-```
+```bash
 cd envs/prod
 tofu init
 tofu plan  -var-file=../../../fleet-private/opentofu/prod.tfvars
@@ -55,83 +102,127 @@ Nothing here imports an existing VM. A VM made by hand stays out of the state, s
 
 ## Servers and clusters
 
-`servers` lists every Proxmox API the VMs live behind, and each gets its own provider (provider `for_each`, new in OpenTofu 1.9). A standalone node is a server of its own. A cluster is one server, reached through any node. Each VM names its `server`, and optionally a `node_name`:
+`servers` lists every Proxmox API the VMs live behind, and each gets its own provider (provider `for_each`, new in OpenTofu 1.9). A standalone node is a server of its own. A cluster is one server, reached through any node.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `endpoint` | `PROXMOX_VE_ENDPOINT` | The API URL |
+| `insecure` | `PROXMOX_VE_INSECURE` | Skip the certificate check |
+| `default_node` | none, required | The node a new VM is created on when it pins none |
+| `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The ISO every VM on this server boots until it is installed |
+| `datastore_id` | `local-zfs` | The datastore for disks and the cloud-init drive |
+
+Each VM names its `server`, and optionally a `node_name`:
 
 - With `node_name`, the VM is pinned. It is created there, and a VM moved elsewhere in Proxmox is migrated back by the next apply that includes it.
-- Without it, a new VM is created on the server's `template_node`, and after that it is left wherever it runs. A data source lists the VMs tagged `tofu` on each server, and the VM's current node is used as its `node_name`, so moving it in Proxmox, or HA doing so, causes no change.
+- Without it, a new VM is created on the server's `default_node`, and after that it is left wherever it runs. A data source lists the VMs tagged `tofu` on each server, and the VM's current node is used as its `node_name`, so moving it in Proxmox, or HA doing so, causes no change.
 
-A cluster has one cloud-init template, on its `template_node`. A pinned VM for another node is cloned there and migrated, which the provider does itself when the storage is not shared. The vendor snippet has to be on every node, since each node reads it from its own `local` storage; the ansible repo's `pve` role puts it there. The clone source only matters at creation, so the module ignores later changes to it, and a new template VMID never plans a replacement.
+### Where the ISO has to be
 
-Every plan reads each server's VM list, so it needs the API even when nothing changes, and the token needs `VM.Audit` on the VMs (the role below has it). A node that is down is left out of the list with a warning, and an unpinned VM on it is then planned back onto the template node. That apply fails while the node is down, and a run against that VM would fail anyway.
+The ISO has to exist, under the name in `installer_iso`, on every node a VM is created on. `local` is a storage each node has for itself, so the file is copied to each node. The ansible repo's `pve` role builds the ISO and does that.
+
+On a cluster, a CD-ROM on node-local storage can stop a VM from migrating. If it does, put the ISO on shared storage and name that storage in `installer_iso`.
+
+### What a plan needs
+
+Every plan reads each server's VM list, so it needs the API even when nothing changes, and the token needs `VM.Audit` on the VMs. The role under [Scoped token](#scoped-token) has it.
+
+A node that is down is left out of the list with a warning, and an unpinned VM on it is then planned back onto the default node. That apply fails while the node is down, and a run against that VM would fail anyway.
 
 Removing a server from `servers` while its VMs are still in the state leaves them without a provider, and the plan fails. Moving a VM to another server is a new VM, which `prevent_destroy` refuses.
 
 ## Driven from Ansible
 
-The ansible repo's `site.yml` runs this configuration through its `vms` role. It checks this repo out, copies the private repo's `opentofu/prod.tfvars` in as `envs/prod/private.auto.tfvars`, and applies with `-target` for the hosts in that run only, each matched to a VM by its `serverHostname` in lower case. A host with no VM in the file matches nothing. Every other VM is still in the input, so the plan leaves it alone, and the role refuses any plan that would destroy something. The tokens and the other environment variables are read from the `ansible-playbook` process. The role's `vms_backend: local` swaps in a local state file for trying it away from Semaphore.
+The ansible repo's `site.yml` runs this configuration through its `vms` role. It checks this repo out, copies the private repo's `opentofu/prod.tfvars` in as `envs/prod/private.auto.tfvars`, and applies with `-target` for the hosts in that run only. Each host is matched to a VM by its `serverHostname` in lower case, and a host with no VM in the file matches nothing.
 
-The `vms` output lists every VM in the input, created or not, with its server, node, VMID and bare IPv4 address. The role uses it to tell a VM from a host built by hand, and checks the address against the host's `ansible_host`.
+Every other VM is still in the input, so the plan leaves it alone, and the role refuses any plan that would destroy something. The tokens and the other environment variables are read from the `ansible-playbook` process. The role's `vms_backend: local` swaps in a local state file for trying it away from Semaphore.
+
+The `vms` output lists every VM in the input, created or not:
+
+| Key | Value |
+| --- | --- |
+| `server` | The VM's key in `servers` |
+| `node_name` | The node it runs on, null until the VM exists |
+| `vm_id` | Its VMID, null until the VM exists |
+| `ipv4_address` | The address, without the prefix length |
+| `ipv4_gateway` | The gateway |
+| `ipv4_prefix_length` | The prefix length, as a number |
+
+`site.yml` uses it to tell a VM from a host built by hand, and stops when the address or gateway differs from the host's entry in the inventory.
 
 Running `tofu` by hand and running `site.yml` against the same state both work, as long as both use the same tfvars. A VM that is in the state but missing from the input is a VM the plan wants to destroy, which `prevent_destroy` stops.
 
-## Verified
-
-Checked with OpenTofu 1.12.6 and 1.9.0 (the version in Semaphore's v2.13.13 image, so `required_version` is `>= 1.9.0`), without a Proxmox server:
-
-- `tofu fmt` is clean and `tofu validate` passes.
-- The example tfvars parse, and a bad VM name or a non-CIDR address is rejected.
-- An offline plan renders the expected resource.
-- With `TF_ENCRYPTION` set, state is written encrypted. Without it, nothing is written.
-
-## Verified against a real Proxmox node (first test clone)
-
-- The `initialization` block leaves the template's `cicustom` vendor snippet, `ciuser` and `sshkeys` intact.
-- The template's VLAN tag, both inherited disks (`scsi0` 20G, `scsi1` 40G) and NUMA carry over to the clone.
-- The QEMU guest agent runs in the clone and reports its address.
-
-Differences from the template that the module sets on purpose (all overridable per VM):
-
-| Setting | Template | Clone | Variable |
-|---|---|---|---|
-| CPU type | none (Proxmox default) | `x86-64-v2-AES` | `cpu_type` |
-| Balloon | 1024 | 0 (off) | `balloon_mb` |
-| Start on node boot | off | on | `on_boot` |
-| Tags | `26.04;cloudinit;ubuntu` | template tags, `tofu`, and the ones you pass | `template_tags`, `tags` |
-
-Also confirmed on that clone: a second `tofu plan` reports no changes, so the inherited disks cause no drift, and cloud-init reached `status: done`. A later apply on the same clone merged its tags as the table shows.
-
-`template_tags` is a plain variable, not read from the template. If the template's tags change, update it to match.
-
 ## Scoped token
 
-A second clone (`example02`) was created with a privilege-separated token that has no access on `/`. The role `TofuVM` is granted to the user and the token on `/vms`, `/storage/local-zfs` and `/sdn/zones/localnetwork`:
+Each standalone server and each cluster needs its own user, role and token. Use a privilege-separated token that has no access on `/`, and grant the role to the user and the token on these paths:
 
-```
+| Path | For |
+| --- | --- |
+| `/vms` | The VMs |
+| `/storage/local-zfs` | The datastore in `datastore_id` |
+| `/storage/local` | The storage that holds the installer ISO |
+| `/sdn/zones/localnetwork` | The bridge |
+
+The role, here named `TofuVM`, has these privileges:
+
+```text
 Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit VM.Allocate VM.Audit
-VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk
+VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk
 VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options
 VM.GuestAgent.Audit VM.Migrate VM.PowerMgmt
 ```
 
-`VM.Migrate` was added afterwards for clones placed on a node other than the template's, and is untested. Each standalone server and each cluster needs its own user, role and token.
+`VM.GuestAgent.Audit` is what current Proxmox versions need to read the guest agent. `VM.Migrate` is for a VM that a plan moves to another node.
 
-`VM.GuestAgent.Audit` is required on current Proxmox versions to read the guest agent (the old `VM.Monitor` no longer exists). The token can still act on every VM under `/vms`. A tighter setup puts managed VMs in a pool and grants on `/pool/<name>`, which needs a `pool_id` in the module.
+The token can act on every VM under `/vms`. A tighter setup puts managed VMs in a pool and grants on `/pool/<name>`, which needs a `pool_id` in the module.
 
-## Apply returns before provisioning finishes
+## Apply returns before the host is installed
 
-`tofu apply` completes once the guest agent reports an address. The agent starts early in first boot, so apply can finish while cloud-init and the Ansible provisioning are still running, by a few minutes in the first test. Do not chain a follow-up job on apply completing. Wait for `cloud-init status --wait` on the host first. `site.yml` does this in its wait stage.
+`tofu apply` completes when the guest agent in the VM reports an address, or when `agent_timeout` runs out, whichever comes first. The default is 5 minutes. Running out is a warning, not an error: the apply succeeds and the VM's addresses are left empty in the state.
 
-That command exits 2, not 0, when cloud-init finishes as `degraded done`. Clones currently do this: Proxmox generates the user-data with a `user:` key that cloud-init has deprecated (removal is scheduled for 27.2), and cloud-init reports it as a recoverable error. Treat exit codes 0 and 2 as success and 1 as failure. `errors: []` in `cloud-init status --long` means nothing actually failed.
+At that point the VM is running the installer, not an installed host. Do not chain a follow-up job on apply completing. `site.yml` waits for SSH on the address in its wait stage, and installs the host in the stage after it.
 
-A `BrokenPipeError` traceback from `cloud-init` in the console at the end of first boot is cosmetic. Python is upgraded while the final stage is still running, so cloud-init cannot report completion over its status socket. `cloud-final` still finishes and no units fail.
+## Changing a VM that is installed
 
-## Not yet verified
+No attribute of the VM is under `ignore_changes`. The provider applies each of these to the existing VM, and none of them plans a replacement:
 
-- The `pg` backend end to end, and a real run of `tofu` from inside Semaphore (its image ships 1.9.0, and this configuration validates and plans on it).
-- A real apply through the ansible repo's `vms` role. Its check-mode plan was tested offline with OpenTofu 1.9.0 and a local backend, including a two-node cluster and a standalone server.
-- A clone migrated to another node of a cluster, and the privileges that needs.
-- A pinned VM moved back after a manual migration, and an unpinned one left where it was. The provider's source finds a moved VM on its new node when it refreshes, and the plan was tested against a mocked VM list, but neither has run against a real cluster.
-- An existing state from before `servers`: its VMs were created under the old single provider. OpenTofu should move them to the new one on the next plan, as long as they stay in the input, but this has not been tried.
+| Change in the tfvars | What the apply does |
+| --- | --- |
+| `installer_iso` | Puts the other ISO in the CD-ROM drive |
+| A disk size, made larger | Grows the disk. The filesystem on it is not grown |
+| A disk size, made smaller | Fails. The provider does not shrink a disk |
+| `ipv4_address`, `ipv4_gateway`, `dns_servers` | Rewrites the cloud-init drive and restarts the VM |
+| `node_name` | Migrates the VM |
+
+> [!WARNING]
+> A changed address, gateway or nameserver restarts an installed host, although the host does not read the cloud-init drive. Change it in a run that expects the restart.
+
+The drives are kept current on purpose. The next install of the VM boots the ISO and reads the address that the tfvars name at that time.
+
+## Verified
+
+Checked with OpenTofu 1.12.6 and 1.9.0, and version 0.113.1 of the bpg/proxmox provider, without a Proxmox server. 1.9.0 is the version in Semaphore's v2.13.13 image, so `required_version` is `>= 1.9.0`.
+
+- `tofu fmt -check -recursive` is clean and `tofu validate` passes in `envs/prod`.
+- An offline plan of the environment renders each VM with its disks, the CD-ROM on ide2 and the cloud-init drive on ide0. The VM list was overridden for that plan.
+- In that plan an unpinned VM lands on `default_node`, a pinned one on its `node_name`, and one that is in the VM list stays on the node it runs on.
+- The `vms` output carries the gateway, and the prefix length as a number.
+- A plan against a state written by hand, run without a refresh, shows an update in place for a changed ISO, a larger disk, and a changed address or nameserver.
+- An entry in `extra_disks` on scsi0 or scsi1 is rejected.
+
+## Not yet confirmed
+
+None of this has run against a Proxmox host.
+
+- A real apply: that Proxmox accepts the VM as the module declares it, and that a blank VM falls through from scsi0 to the ISO.
+- That the installer reads the address from the cloud-init drive on ide0, and that its guest agent reports the address before `agent_timeout` runs out.
+- That a second plan after an apply, and after an install, reports no changes.
+- The privileges under [Scoped token](#scoped-token) for a VM created blank, and `Datastore.Audit` on the ISO's storage being enough to attach the ISO.
+- Migration of a VM whose CD-ROM holds an ISO from node-local storage.
+- A pinned VM moved back after a manual migration, and an unpinned one left where it was.
+- The restart after a changed address, on a host that is running stacks.
+- The `pg` backend end to end, and a real run of `tofu` from inside Semaphore.
+- A real apply through the ansible repo's `vms` role.
 
 ## License
 
