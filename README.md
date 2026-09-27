@@ -31,7 +31,9 @@ The module declares every drive, so nothing about a VM comes from outside this r
 | ide2 | `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The installer ISO, as a CD-ROM |
 | ide0 | `ipv4_address`, `ipv4_gateway`, `dns_servers` | none | The cloud-init drive |
 
-The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install.
+The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install. Root on the VM can therefore read the ISO, which holds the installer's private host key. See the nixos-fleet README.
+
+A host with the Docker feature needs the scsi2 entry in `extra_disks`. Nothing checks this before the apply, and the install stops once it finds no disk there.
 
 Only the installer reads the cloud-init drive, to take the address it listens on. An installed host takes its address from its own configuration.
 
@@ -148,7 +150,7 @@ The `vms` output lists every VM in the input, created or not:
 | `ipv4_gateway` | The gateway |
 | `ipv4_prefix_length` | The prefix length, as a number |
 
-`site.yml` uses it to tell a VM from a host built by hand, and stops when the address or gateway differs from the host's entry in the inventory.
+`site.yml` reads it after the apply, and stops when the address, prefix length or gateway differs from the host's entry in the inventory.
 
 Running `tofu` by hand and running `site.yml` against the same state both work, as long as both use the same tfvars. A VM that is in the state but missing from the input is a VM the plan wants to destroy, which `prevent_destroy` stops.
 

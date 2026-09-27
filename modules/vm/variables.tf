@@ -111,7 +111,7 @@ variable "docker_disk_gb" {
 }
 
 variable "extra_disks" {
-  description = "Disks added after scsi0 and scsi1. The interface is explicit, for example scsi2."
+  description = "Disks added after scsi0 and scsi1. The interface is explicit, for example scsi2. A host with the Docker feature needs scsi2, which the host mounts as its persistent disk, and the install stops without it."
   type = map(object({
     interface    = string
     size_gb      = number
