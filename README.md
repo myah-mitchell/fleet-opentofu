@@ -31,7 +31,7 @@ The module declares every drive, so nothing about a VM comes from outside this r
 | ide2 | `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The installer ISO, as a CD-ROM |
 | ide0 | `ipv4_address`, `ipv4_gateway`, `dns_servers` | none | The cloud-init drive |
 
-The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install. Root on the VM can therefore read the ISO, which holds the installer's private host key. See the nixos-fleet README.
+The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install. The ISO holds no secret, so leaving it there gives the VM nothing it should not have.
 
 A host with the Docker feature needs the scsi2 entry in `extra_disks`. Nothing checks this before the apply, and the install stops once it finds no disk there.
 
