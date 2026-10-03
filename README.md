@@ -150,7 +150,7 @@ The `vms` output lists every VM in the input, created or not:
 | `ipv4_gateway` | The gateway |
 | `ipv4_prefix_length` | The prefix length, as a number |
 
-`site.yml` reads it after the apply, and stops when the address, prefix length or gateway differs from the host's entry in the inventory.
+`site.yml` reads it after the apply, for each VM's node and VMID. Before the apply, it reads `var.vms` through `tofu console` and stops, for every host, when a VM's address, prefix length, gateway or `dns_servers` differs from the host's entry in the inventory. A VM with no `dns_servers` is not compared on nameservers.
 
 Running `tofu` by hand and running `site.yml` against the same state both work, as long as both use the same tfvars. A VM that is in the state but missing from the input is a VM the plan wants to destroy, which `prevent_destroy` stops.
 
