@@ -20,7 +20,7 @@ servers = {
   lab = {
     endpoint      = "https://192.0.2.3:8006/"
     default_node  = "pve02"
-    installer_iso = "local:iso/nixos-fleet-installer.iso"
+    installer_iso = "local:iso/fleet-nixos-installer.iso"
   }
 }
 

@@ -1,6 +1,6 @@
-# opentofu
+# fleet-opentofu
 
-OpenTofu configuration that creates the fleet's VMs on Proxmox. Each VM is created blank, with the installer ISO in its CD-ROM drive, and boots into the installer. It is the first stage of the ansible repo's `site.yml`, which builds a host in one run. See [How a host is built](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/how-a-host-is-built/).
+OpenTofu configuration that creates the fleet's VMs on Proxmox. Each VM is created blank, with the installer ISO in its CD-ROM drive, and boots into the installer. It is the first stage of the fleet-ansible repo's `site.yml`, which builds a host in one run. See [How a host is built](https://myah-mitchell.github.io/docs/fleet-bootstrap/concepts/how-a-host-is-built/).
 
 Status: validated and planned offline, not yet applied to a Proxmox host. See [Not yet confirmed](#not-yet-confirmed).
 
@@ -28,7 +28,7 @@ The module declares every drive, so nothing about a VM comes from outside this r
 | scsi0 | `os_disk_gb` | 20 | `/` and `/boot` |
 | scsi1 | `docker_disk_gb` | 40 | `/var/lib/docker` |
 | scsi2 | `extra_disks` | none | `/srv/persist`, the persistent disk |
-| ide2 | `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The installer ISO, as a CD-ROM |
+| ide2 | `installer_iso` | `local:iso/fleet-nixos-installer.iso` | The installer ISO, as a CD-ROM |
 | ide0 | `ipv4_address`, `ipv4_gateway`, `dns_servers` | none | The cloud-init drive |
 
 The boot order is scsi0, then ide2. A blank VM finds nothing to boot on scsi0 and falls through to the installer. An installed VM boots its disk, with the ISO still in the drive for the next install. The ISO holds no secret, so leaving it there gives the VM nothing it should not have.
@@ -111,7 +111,7 @@ Nothing here imports an existing VM. A VM made by hand stays out of the state, s
 | `endpoint` | `PROXMOX_VE_ENDPOINT` | The API URL |
 | `insecure` | `PROXMOX_VE_INSECURE` | Skip the certificate check |
 | `default_node` | none, required | The node a new VM is created on when it pins none |
-| `installer_iso` | `local:iso/nixos-fleet-installer.iso` | The ISO every VM on this server boots until it is installed |
+| `installer_iso` | `local:iso/fleet-nixos-installer.iso` | The ISO every VM on this server boots until it is installed |
 | `datastore_id` | `local-zfs` | The datastore for disks and the cloud-init drive |
 
 Each VM names its `server`, and optionally a `node_name`:
@@ -121,7 +121,7 @@ Each VM names its `server`, and optionally a `node_name`:
 
 ### Where the ISO has to be
 
-The ISO has to exist, under the name in `installer_iso`, on every node a VM is created on. `local` is a storage each node has for itself, so the file is copied to each node. The ansible repo's `pve` role builds the ISO and does that.
+The ISO has to exist, under the name in `installer_iso`, on every node a VM is created on. `local` is a storage each node has for itself, so the file is copied to each node. The fleet-ansible repo's `pve` role builds the ISO and does that.
 
 On a cluster, a CD-ROM on node-local storage can stop a VM from migrating. If it does, put the ISO on shared storage and name that storage in `installer_iso`.
 
@@ -135,7 +135,7 @@ Removing a server from `servers` while its VMs are still in the state leaves the
 
 ## Driven from Ansible
 
-The ansible repo's `site.yml` runs this configuration through its `vms` role. It checks this repo out, copies the private repo's `opentofu/prod.tfvars` in as `envs/prod/private.auto.tfvars`, and applies with `-target` for the hosts in that run only. Each host is matched to a VM by its `serverHostname` in lower case, and a host with no VM in the file matches nothing.
+The fleet-ansible repo's `site.yml` runs this configuration through its `vms` role. It checks this repo out, copies the private repo's `opentofu/prod.tfvars` in as `envs/prod/private.auto.tfvars`, and applies with `-target` for the hosts in that run only. Each host is matched to a VM by its `serverHostname` in lower case, and a host with no VM in the file matches nothing.
 
 Every other VM is still in the input, so the plan leaves it alone, and the role refuses any plan that would destroy something. The tokens and the other environment variables are read from the `ansible-playbook` process. The role's `vms_backend: local` swaps in a local state file for trying it away from Semaphore.
 
@@ -224,7 +224,7 @@ None of this has run against a Proxmox host.
 - A pinned VM moved back after a manual migration, and an unpinned one left where it was.
 - The restart after a changed address, on a host that is running stacks.
 - The `pg` backend end to end, and a real run of `tofu` from inside Semaphore.
-- A real apply through the ansible repo's `vms` role.
+- A real apply through the fleet-ansible repo's `vms` role.
 
 ## License
 

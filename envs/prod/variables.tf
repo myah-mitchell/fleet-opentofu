@@ -12,7 +12,7 @@ variable "servers" {
     default_node = string
     # The installer ISO every VM boots until it is installed. It has to be on
     # every node a VM is created on.
-    installer_iso = optional(string, "local:iso/nixos-fleet-installer.iso")
+    installer_iso = optional(string, "local:iso/fleet-nixos-installer.iso")
     datastore_id  = optional(string, "local-zfs")
   }))
 
