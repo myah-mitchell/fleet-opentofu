@@ -78,12 +78,12 @@ variable "vlan_id" {
 }
 
 variable "ipv4_address" {
-  description = "Static address in CIDR form, for example 192.0.2.10/24."
+  description = "Static address in CIDR form, for example 172.16.7.90/24."
   type        = string
 
   validation {
     condition     = can(cidrhost(var.ipv4_address, 0))
-    error_message = "ipv4_address must be in CIDR form, for example 192.0.2.10/24."
+    error_message = "ipv4_address must be in CIDR form, for example 172.16.7.90/24."
   }
 }
 

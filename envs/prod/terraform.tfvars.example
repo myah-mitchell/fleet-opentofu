@@ -2,24 +2,24 @@
 # repo as opentofu/prod.tfvars, which the ansible vms role reads, and fill in
 # real values. variables.tf lists every key and its default.
 #
-# Addresses below are from the documentation range (RFC 5737), not real hosts.
+# Addresses below are made-up examples from 172.16.0.0/16, not real hosts.
 # API tokens do not go here. Set TF_VAR_server_api_tokens to a JSON object keyed
 # like servers, or PROXMOX_VE_API_TOKEN when there is only one server.
 
 servers = {
   # A standalone node. insecure skips the certificate check, only while the
   # API certificate is self-signed.
-  pve01 = {
-    endpoint     = "https://192.0.2.2:8006/"
+  vh01 = {
+    endpoint     = "https://172.16.0.11:8006/"
     insecure     = true
-    default_node = "pve01"
+    default_node = "vh01"
   }
 
   # A cluster, reached through its first node. installer_iso is shown with its
   # default. The ansible pve role puts that file on every node's local storage.
-  lab = {
-    endpoint      = "https://192.0.2.3:8006/"
-    default_node  = "pve02"
+  cluster = {
+    endpoint      = "https://172.16.0.12:8006/"
+    default_node  = "vh02"
     installer_iso = "local:iso/fleet-nixos-installer.iso"
   }
 }
@@ -30,13 +30,13 @@ servers = {
 vms = {
   # A standalone server has one node, so there is nothing to pin.
   example01 = {
-    server         = "pve01"
+    server         = "vh01"
     cores          = 2
     memory_mb      = 4096
     vlan_id        = 7
-    ipv4_address   = "192.0.2.10/24"
-    ipv4_gateway   = "192.0.2.1"
-    dns_servers    = ["192.0.2.1"]
+    ipv4_address   = "172.16.7.90/24"
+    ipv4_gateway   = "172.16.7.1"
+    dns_servers    = ["172.16.7.1"]
     tags           = ["docker"]
     os_disk_gb     = 20
     docker_disk_gb = 60
@@ -48,13 +48,13 @@ vms = {
     }
   }
 
-  # Pinned: created on pve03, and moved back there if it is ever moved.
-  # Without node_name it would be created on pve02 and then left wherever it
+  # Pinned: created on vh03, and moved back there if it is ever moved.
+  # Without node_name it would be created on vh02 and then left wherever it
   # runs. The disks take their default sizes.
   example02 = {
-    server       = "lab"
-    node_name    = "pve03"
-    ipv4_address = "192.0.2.11/24"
-    ipv4_gateway = "192.0.2.1"
+    server       = "cluster"
+    node_name    = "vh03"
+    ipv4_address = "172.16.7.93/24"
+    ipv4_gateway = "172.16.7.1"
   }
 }
