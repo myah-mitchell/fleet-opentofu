@@ -10,7 +10,7 @@ servers = {
   # A standalone node. insecure skips the certificate check, only while the
   # API certificate is self-signed.
   vh01 = {
-    endpoint     = "https://172.16.0.11:8006/"
+    endpoint     = "https://172.16.1.11:8006/"
     insecure     = true
     default_node = "vh01"
   }
@@ -18,7 +18,7 @@ servers = {
   # A cluster, reached through its first node. installer_iso is shown with its
   # default. The ansible pve role puts that file on every node's local storage.
   cluster = {
-    endpoint      = "https://172.16.0.12:8006/"
+    endpoint      = "https://172.16.1.12:8006/"
     default_node  = "vh02"
     installer_iso = "local:iso/fleet-nixos-installer.iso"
   }
